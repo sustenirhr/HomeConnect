@@ -88,6 +88,18 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (job_id, worker_id)
   );
+
+  -- Chat between a matched employer and worker. read_at is set when the recipient opens the chat.
+  CREATE TABLE IF NOT EXISTS messages (
+    id          INTEGER PRIMARY KEY,
+    employer_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    worker_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    sender_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    body        TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    read_at     TEXT
+  );
+  CREATE INDEX IF NOT EXISTS messages_by_pair ON messages (employer_id, worker_id, id);
 `);
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {

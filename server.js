@@ -252,6 +252,19 @@ function requireRole(req, role) {
 
 const me = (user) => ({ role: user.role, phone: user.phone, profile: ownProfile(user) });
 
+const MATCHED = "decision = 'accept' AND worker_response = 'accept'";
+
+// Chat is only open between an employer and worker who have both accepted each other.
+function chatPair(user, otherId) {
+  const [employerId, workerId] = user.role === 'employer' ? [user.id, otherId] : [otherId, user.id];
+  if (!db.prepare(`SELECT 1 FROM decisions WHERE employer_id = ? AND worker_id = ? AND ${MATCHED}`).get(employerId, workerId)) {
+    throw new HttpError(403, 'You can only chat once you have both accepted each other');
+  }
+  return { employerId, workerId };
+}
+
+const messageView = (row, userId) => ({ id: row.id, mine: row.sender_id === userId, body: row.body, created_at: row.created_at });
+
 // ---------- api ----------
 
 async function api(req, res, url) {
@@ -309,6 +322,7 @@ async function api(req, res, url) {
     const minAge = num(url.searchParams.get('min_age') ?? '');
     const maxAge = num(url.searchParams.get('max_age') ?? '');
     const religion = str(url.searchParams.get('religion') ?? '', 40);
+    const conduct = { yes: 1, no: 0 }[url.searchParams.get('good_conduct')] ?? -1; // -1 = either
     // The education filter is a minimum: "Secondary" also returns Diploma, Degree and so on.
     const levels = EDUCATION.slice(Math.max(0, EDUCATION.indexOf(url.searchParams.get('education'))));
     const rows = db
@@ -319,13 +333,14 @@ async function api(req, res, url) {
            AND (? = '' OR w.work_type = ? OR w.work_type = 'either')
            AND w.age BETWEEN ? AND ?
            AND (? = '' OR w.religion = ?)
+           AND (? = -1 OR w.good_conduct = ?)
            AND w.education IN (${levels.map(() => '?').join(', ')})
          ORDER BY w.user_id DESC LIMIT 30`
       )
       .all(
         user.id, `%${location}%`, type, type,
         Number.isNaN(minAge) ? 0 : minAge, Number.isNaN(maxAge) ? 999 : maxAge,
-        religion, religion, ...levels
+        religion, religion, conduct, conduct, ...levels
       );
     return send(res, 200, rows.map((row) => workerView(row, false)));
   }
@@ -492,6 +507,57 @@ async function api(req, res, url) {
     const user = requireRole(req, 'worker');
     db.prepare("DELETE FROM applications WHERE job_id = ? AND worker_id = ? AND status = 'pending'").run(Number(m[1]), user.id);
     return send(res, 200, {});
+  }
+
+  // ----- chat between matched employers and workers -----
+
+  if (route === 'GET /api/chats/unread') {
+    const user = requireRole(req);
+    const rows = db
+      .prepare(
+        `SELECT CASE WHEN m.employer_id = ? THEN m.worker_id ELSE m.employer_id END AS other, COUNT(*) AS n
+         FROM messages m JOIN decisions d ON d.employer_id = m.employer_id AND d.worker_id = m.worker_id
+         WHERE (m.employer_id = ? OR m.worker_id = ?) AND m.sender_id != ? AND m.read_at IS NULL
+           AND d.decision = 'accept' AND d.worker_response = 'accept'
+         GROUP BY other`
+      )
+      .all(user.id, user.id, user.id, user.id);
+    const by = Object.fromEntries(rows.map((r) => [r.other, r.n]));
+    return send(res, 200, { total: rows.reduce((sum, r) => sum + r.n, 0), by });
+  }
+
+  if ((m = /^GET \/api\/chats\/(\d+)$/.exec(route))) {
+    const user = requireRole(req);
+    const otherId = Number(m[1]);
+    const { employerId, workerId } = chatPair(user, otherId);
+    const after = num(url.searchParams.get('after') ?? '');
+    const messages = db
+      .prepare('SELECT * FROM messages WHERE employer_id = ? AND worker_id = ? AND id > ? ORDER BY id LIMIT 500')
+      .all(employerId, workerId, Number.isNaN(after) ? 0 : after);
+    db.prepare(
+      'UPDATE messages SET read_at = CURRENT_TIMESTAMP WHERE employer_id = ? AND worker_id = ? AND sender_id != ? AND read_at IS NULL'
+    ).run(employerId, workerId, user.id);
+    const result = { messages: messages.map((row) => messageView(row, user.id)) };
+    // Polls pass ?after= and only need new messages; the first load also gets who the chat is with.
+    if (Number.isNaN(after)) {
+      const other =
+        user.role === 'employer'
+          ? db.prepare('SELECT w.name, w.photo, u.phone FROM workers w JOIN users u ON u.id = w.user_id WHERE w.user_id = ?').get(otherId)
+          : db.prepare('SELECT e.name, u.phone FROM employers e JOIN users u ON u.id = e.user_id WHERE e.user_id = ?').get(otherId);
+      result.other = { id: otherId, ...other };
+    }
+    return send(res, 200, result);
+  }
+
+  if ((m = /^POST \/api\/chats\/(\d+)$/.exec(route))) {
+    const user = requireRole(req);
+    const { employerId, workerId } = chatPair(user, Number(m[1]));
+    const body = str((await readJson(req)).body, 1000);
+    need(body, 'Write a message first');
+    const { lastInsertRowid } = db
+      .prepare('INSERT INTO messages (employer_id, worker_id, sender_id, body) VALUES (?, ?, ?, ?)')
+      .run(employerId, workerId, user.id, body);
+    return send(res, 201, messageView(db.prepare('SELECT * FROM messages WHERE id = ?').get(lastInsertRowid), user.id));
   }
 
   // ----- worker side -----

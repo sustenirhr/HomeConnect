@@ -7,7 +7,7 @@ const WORK_TYPES = { fulltime: 'Full-time', parttime: 'Part-time', either: 'Full
 const $ = (selector, root = document) => root.querySelector(selector);
 const app = $('#app');
 
-const noFilters = () => ({ location: '', work_type: '', religion: '', education: '', min_age: '', max_age: '' });
+const noFilters = () => ({ location: '', work_type: '', religion: '', education: '', min_age: '', max_age: '', good_conduct: '' });
 
 const state = {
   me: null,
@@ -292,7 +292,101 @@ function renderAuth(screen) {
 
 // ---------- signed-in shell ----------
 
+// ---------- chat ----------
+// Open between a matched employer and worker. New messages are fetched every few seconds
+// while a chat is open, and unread counts are refreshed in the background.
+
+const CHAT_POLL_MS = 4000;
+const UNREAD_POLL_MS = 20000;
+let chatTimer = null;
+let unreadTimer = null;
+
+const chatButton = (otherId, unread) =>
+  `<button class="btn sm chat-btn" data-action="open-chat" data-id="${otherId}">Chat${unread ? ` <span class="count">${unread}</span>` : ''}</button>`;
+
+const chatTime = (timestamp) =>
+  new Date(`${timestamp.replace(' ', 'T')}Z`).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+
+function stopChat() {
+  clearInterval(chatTimer);
+  chatTimer = null;
+  state.chat = null;
+}
+
+// Puts a dot on the tab where matched chats live when there are unread messages.
+async function refreshUnread() {
+  if (!state.me) return;
+  const tabId = state.me.role === 'employer' ? 'shortlist' : 'requests';
+  try {
+    const { total } = await api('GET', '/api/chats/unread');
+    const tab = $(`.tabs [data-tab="${tabId}"]`);
+    if (tab) tab.classList.toggle('unread', total > 0);
+  } catch {
+    // Network blips are fine; the next poll tries again.
+  }
+}
+
+function appendMessages(messages) {
+  const list = $('#messages');
+  if (!list || !messages.length) return;
+  const nearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+  $('.chat-empty', list)?.remove();
+  list.insertAdjacentHTML(
+    'beforeend',
+    messages
+      .filter((msg) => msg.id > state.chat.lastId)
+      .map(
+        (msg) => `<div class="bubble ${msg.mine ? 'mine' : 'theirs'}">
+          <p>${esc(msg.body)}</p><time>${chatTime(msg.created_at)}</time>
+        </div>`
+      )
+      .join('')
+  );
+  state.chat.lastId = Math.max(state.chat.lastId, ...messages.map((msg) => msg.id));
+  if (nearBottom || messages.some((msg) => msg.mine)) list.scrollTop = list.scrollHeight;
+}
+
+async function openChat(otherId) {
+  stopChat();
+  state.chat = { otherId, lastId: 0 };
+  const { other, messages } = await api('GET', `/api/chats/${otherId}`);
+  $('#view').innerHTML = `
+    <section class="chat">
+      <header class="chat-head">
+        <button class="round nav" data-action="close-chat" aria-label="Back">‹</button>
+        <div class="avatar">${picture(other)}</div>
+        <div class="grow">
+          <h3>${esc(other.name)}</h3>
+          <a class="small" href="tel:${esc(other.phone)}">${esc(other.phone)}</a>
+        </div>
+      </header>
+      <div class="messages" id="messages" aria-live="polite">
+        <p class="chat-empty muted small">No messages yet. Say hello to ${firstName(other.name)}!</p>
+      </div>
+      <form id="chat-form" class="composer">
+        <textarea name="body" rows="1" maxlength="1000" required placeholder="Write a message…" aria-label="Message"></textarea>
+        <button class="btn sm" type="submit">Send</button>
+      </form>
+    </section>`;
+  appendMessages(messages);
+  $('#messages').scrollTop = $('#messages').scrollHeight;
+  refreshUnread();
+  chatTimer = setInterval(async () => {
+    if (!state.chat || !$('#messages')) return stopChat();
+    try {
+      const { messages: fresh } = await api('GET', `/api/chats/${otherId}?after=${state.chat.lastId}`);
+      appendMessages(fresh);
+    } catch {
+      // Try again on the next tick.
+    }
+  }, CHAT_POLL_MS);
+  $('#chat-form textarea').focus();
+}
+
 function renderHome() {
+  stopChat();
+  clearInterval(unreadTimer);
+  unreadTimer = setInterval(refreshUnread, UNREAD_POLL_MS);
   const tabs =
     state.me.role === 'employer'
       ? [['browse', 'Browse'], ['jobs', 'Jobs'], ['shortlist', 'Shortlist'], ['profile', 'Profile']]
@@ -308,6 +402,7 @@ function renderHome() {
       ${tabs.map(([id, label]) => `<button data-action="tab" data-tab="${id}" class="${id === state.tab ? 'on' : ''}">${label}</button>`).join('')}
     </nav>`;
   views[state.tab]().catch((err) => toast(err.message));
+  refreshUnread();
 }
 
 const emptyState = (title, text, extra = '') =>
@@ -666,6 +761,11 @@ const views = {
           <input name="max_age" value="${esc(f.max_age)}" type="number" min="18" max="80" inputmode="numeric" placeholder="Max age" aria-label="Maximum age">
           ${filterSelect('religion', 'Filter by religion', [['', 'Any religion'], ...same(RELIGIONS)])}
           ${filterSelect('education', 'Filter by minimum education', [['', 'Any education'], ...EDUCATION.slice(1).map((level) => [level, `${level} or higher`])])}
+          ${filterSelect('good_conduct', 'Filter by certificate of good conduct', [
+            ['', 'Good conduct certificate: any'],
+            ['yes', 'Has good conduct certificate'],
+            ['no', 'No good conduct certificate'],
+          ])}
           <button type="button" class="link small" data-action="clear-filters">Clear all filters</button>
         </form>
       </details>
@@ -685,7 +785,7 @@ const views = {
   // ---------- employer: shortlist ----------
 
   async shortlist() {
-    const workers = await api('GET', '/api/shortlist');
+    const [workers, unread] = await Promise.all([api('GET', '/api/shortlist'), api('GET', '/api/chats/unread')]);
     const badge = { pending: '<span class="chip">Awaiting reply</span>', accept: '<span class="chip solid">Matched</span>', decline: '<span class="chip off">Declined</span>' };
     $('#view').innerHTML = workers.length
       ? `<div class="list">
@@ -701,7 +801,10 @@ const views = {
                 </div>
                 ${w.phone ? `<div class="contact">Call ${esc(w.name.split(' ')[0])}: <a href="tel:${esc(w.phone)}">${esc(w.phone)}</a></div>` : ''}
                 <details><summary>View full profile</summary><div>${workerChips(w)}${workerDetails(w)}</div></details>
-                <div class="item-actions"><button class="btn plain sm" data-action="remove-shortlist" data-id="${w.id}">Remove from shortlist</button></div>
+                <div class="item-actions">
+                  <button class="btn plain sm" data-action="remove-shortlist" data-id="${w.id}">Remove from shortlist</button>
+                  ${w.status === 'accept' ? chatButton(w.id, unread.by[w.id]) : ''}
+                </div>
               </article>`
             )
             .join('')}
@@ -712,7 +815,7 @@ const views = {
   // ---------- worker: requests ----------
 
   async requests() {
-    const employers = await api('GET', '/api/requests');
+    const [employers, unread] = await Promise.all([api('GET', '/api/requests'), api('GET', '/api/chats/unread')]);
     $('#view').innerHTML = employers.length
       ? `<div class="list">
           <h2>Interested employers</h2>
@@ -732,7 +835,8 @@ const views = {
                 </dl>
                 ${
                   e.status === 'accept'
-                    ? `<div class="contact">Call ${esc(e.name.split(' ')[0])}: <a href="tel:${esc(e.phone)}">${esc(e.phone)}</a></div>`
+                    ? `<div class="contact">Call ${esc(e.name.split(' ')[0])}: <a href="tel:${esc(e.phone)}">${esc(e.phone)}</a></div>
+                      <div class="item-actions">${chatButton(e.id, unread.by[e.id])}</div>`
                     : `<div class="item-actions">
                         <button class="btn plain sm" data-action="respond" data-id="${e.id}" data-response="decline">Decline</button>
                         <button class="btn sm" data-action="respond" data-id="${e.id}" data-response="accept">Accept</button>
@@ -794,7 +898,14 @@ const actions = {
     toast('Application withdrawn.');
     await views.jobs();
   },
+  'open-chat': (el) => openChat(Number(el.dataset.id)),
+  'close-chat'() {
+    stopChat();
+    return views[state.tab]();
+  },
   async logout() {
+    stopChat();
+    clearInterval(unreadTimer);
     await api('POST', '/api/logout', {});
     Object.assign(state, { me: null, tab: null, deck: [], filters: noFilters() });
     renderLanding();
@@ -893,6 +1004,13 @@ document.addEventListener('submit', async (e) => {
       });
       renderHome();
       toast('Welcome to HomeConnect!');
+    } else if (form.id === 'chat-form') {
+      const text = form.body.value.trim();
+      if (!text) return;
+      const message = await api('POST', `/api/chats/${state.chat.otherId}`, { body: text });
+      form.body.value = '';
+      appendMessages([message]);
+      form.body.focus();
     } else if (form.id === 'job-form') {
       const f = new FormData(form);
       await api('POST', '/api/jobs', Object.fromEntries(['title', 'location', 'work_type', 'salary', 'start_date', 'duties', 'requirements'].map((k) => [k, f.get(k) ?? ''])));
@@ -915,6 +1033,12 @@ document.addEventListener('submit', async (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
+  // Enter sends a chat message; Shift+Enter starts a new line.
+  if (e.target.matches?.('#chat-form textarea') && e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+    e.preventDefault();
+    e.target.form.requestSubmit();
+    return;
+  }
   if (!e.target.matches?.('.card.top')) return;
   const step = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
   const decision = { ArrowUp: 'accept', ArrowDown: 'reject' }[e.key];
