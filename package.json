@@ -1,0 +1,14 @@
+{
+  "name": "homeconnect",
+  "version": "1.0.0",
+  "description": "Where employers and domestic workers meet",
+  "private": true,
+  "main": "server.js",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server.js",
+    "seed": "node --disable-warning=ExperimentalWarning seed.js"
+  }
+}
