@@ -13,6 +13,7 @@ const state = {
   me: null,
   tab: null,
   deck: [],
+  deckIndex: 0, // which profile in the deck is on screen
   filters: noFilters(),
   jobScreen: null, // employer Jobs tab: null = list, 'new' = post form, number = that vacancy's applicants
   jobArea: '', // worker Jobs tab area filter
@@ -344,12 +345,21 @@ function workerDetails(w) {
 }
 
 // ---------- employer: browse ----------
+// Swiping sideways moves between profiles without deciding anything.
+// Swiping the photo up shortlists the worker; swiping it down rejects them.
+
+const wait = (ms) => new Promise((done) => setTimeout(done, ms));
 
 const deckCard = (w, position) => `
-  <article class="card ${position}" ${position === 'top' ? 'tabindex="0" aria-label="Worker profile"' : 'aria-hidden="true"'}>
+  <article class="card ${position}" ${
+    position === 'top'
+      ? 'tabindex="0" aria-label="Worker profile. Left and right arrow keys browse, up shortlists, down rejects."'
+      : 'aria-hidden="true"'
+  }>
     <div class="photo">
       ${picture(w)}
-      <span class="stamp yes">Accept</span><span class="stamp no">Reject</span>
+      <span class="stamp yes">Shortlist</span><span class="stamp no">Reject</span>
+      ${position === 'top' ? `<span class="counter">${state.deckIndex + 1} / ${state.deck.length}</span>` : ''}
       <div class="who">
         <h3>${esc(w.name)} <small>${w.age}</small></h3>
         <div>${esc(w.location)}</div>
@@ -370,62 +380,105 @@ function renderDeck() {
     );
     return;
   }
-  const [top, next] = state.deck;
+  const last = state.deck.length - 1;
+  state.deckIndex = Math.min(Math.max(state.deckIndex, 0), last);
+  const i = state.deckIndex;
+  const top = state.deck[i];
+  const next = state.deck[i + 1] ?? state.deck[i - 1];
   stage.innerHTML = `
     <div class="deck">${next ? deckCard(next, 'next') : ''}${deckCard(top, 'top')}</div>
+    <p class="swipe-hint">Swipe the photo <strong>up</strong> to shortlist, <strong>down</strong> to reject · swipe sideways to browse</p>
     <div class="actions">
+      <div class="action"><button class="round nav" data-action="browse-step" data-step="-1" aria-label="Previous profile" ${i === 0 ? 'disabled' : ''}>‹</button>Back</div>
       <div class="action"><button class="round reject" data-action="decide" data-decision="reject" aria-label="Reject">✕</button>Reject</div>
-      <div class="action"><button class="round skip" data-action="decide" data-decision="skip" aria-label="Skip for now">↷</button>Later</div>
-      <div class="action"><button class="round accept" data-action="decide" data-decision="accept" aria-label="Accept">✓</button>Accept</div>
+      <div class="action"><button class="round accept" data-action="decide" data-decision="accept" aria-label="Shortlist">✓</button>Shortlist</div>
+      <div class="action"><button class="round nav" data-action="browse-step" data-step="1" aria-label="Next profile" ${i === last ? 'disabled' : ''}>›</button>Next</div>
     </div>`;
   attachSwipe($('.card.top'));
 }
 
 function attachSwipe(card) {
-  let startX = null;
+  let start = null;
+  let axis = null; // 'x' = browsing, 'y' = deciding, 'none' = let the details area scroll
   let dx = 0;
+  let dy = 0;
+  const reset = () => {
+    card.style.transform = '';
+    card.dataset.lean = '';
+  };
   card.addEventListener('pointerdown', (e) => {
     if (state.busy || e.button > 0) return;
-    startX = e.clientX;
-    dx = 0;
+    start = { x: e.clientX, y: e.clientY, onPhoto: !!e.target.closest('.photo') };
+    axis = null;
+    dx = dy = 0;
     card.setPointerCapture(e.pointerId);
     card.style.transition = 'none';
   });
   card.addEventListener('pointermove', (e) => {
-    if (startX === null) return;
-    dx = e.clientX - startX;
-    card.style.transform = `translateX(${dx}px) rotate(${dx / 18}deg)`;
-    card.dataset.lean = dx > 40 ? 'accept' : dx < -40 ? 'reject' : '';
+    if (!start) return;
+    dx = e.clientX - start.x;
+    dy = e.clientY - start.y;
+    if (!axis && Math.hypot(dx, dy) > 10) axis = Math.abs(dx) > Math.abs(dy) ? 'x' : start.onPhoto ? 'y' : 'none';
+    if (axis === 'x') {
+      card.style.transform = `translateX(${dx}px) rotate(${dx / 30}deg)`;
+    } else if (axis === 'y') {
+      card.style.transform = `translateY(${dy}px)`;
+      card.dataset.lean = dy < -40 ? 'accept' : dy > 40 ? 'reject' : '';
+    }
   });
   const release = () => {
-    if (startX === null) return;
-    startX = null;
+    if (!start) return;
+    start = null;
     card.style.transition = '';
-    if (Math.abs(dx) > 110) return decide(dx > 0 ? 'accept' : 'reject');
-    card.style.transform = '';
-    card.dataset.lean = '';
+    if (axis === 'x' && Math.abs(dx) > 90) return browse(dx < 0 ? 1 : -1);
+    if (axis === 'y' && Math.abs(dy) > 90) return decide(dy < 0 ? 'accept' : 'reject');
+    reset();
   };
   card.addEventListener('pointerup', release);
   card.addEventListener('pointercancel', release);
 }
 
+// Moves to the next (step 1) or previous (step -1) profile without recording a decision.
+async function browse(step) {
+  if (state.busy) return;
+  const card = $('.card.top');
+  const target = state.deckIndex + step;
+  if (target < 0 || target >= state.deck.length) {
+    if (card) card.style.transform = '';
+    toast(target < 0 ? 'This is the first profile.' : "You've reached the last profile.");
+    return;
+  }
+  state.busy = true;
+  if (card) {
+    card.style.opacity = '0';
+    card.style.transform = `translateX(${step > 0 ? -120 : 120}%) rotate(${step > 0 ? -8 : 8}deg)`;
+    await wait(220);
+  }
+  state.deckIndex = target;
+  state.busy = false;
+  renderDeck();
+}
+
 async function decide(decision) {
-  const worker = state.deck[0];
+  const worker = state.deck[state.deckIndex];
   if (!worker || state.busy) return;
   state.busy = true;
   try {
-    if (decision !== 'skip') await api('POST', '/api/decisions', { worker_id: worker.id, decision });
+    await api('POST', '/api/decisions', { worker_id: worker.id, decision });
     const card = $('.card.top');
     if (card) {
       card.dataset.lean = decision;
       card.style.opacity = '0';
-      card.style.transform =
-        decision === 'skip' ? 'translateY(-60%) scale(0.9)' : `translateX(${decision === 'accept' ? 130 : -130}%) rotate(${decision === 'accept' ? 22 : -22}deg)`;
+      card.style.transform = `translateY(${decision === 'accept' ? -120 : 120}%)`;
     }
-    state.deck.shift();
-    if (decision === 'skip') state.deck.push(worker);
-    if (decision === 'accept') toast(`${worker.name} added to your shortlist. They'll see your request.`);
-    await new Promise((done) => setTimeout(done, 260));
+    // The profile leaves the deck; the index now points at the one that followed it.
+    state.deck.splice(state.deckIndex, 1);
+    toast(
+      decision === 'accept'
+        ? `${worker.name} added to your shortlist. They'll see your request.`
+        : `${worker.name} rejected. You can bring rejected profiles back from your Profile tab.`
+    );
+    await wait(260);
   } catch (err) {
     toast(err.message);
   }
@@ -436,6 +489,7 @@ async function decide(decision) {
 async function loadDeck() {
   const query = new URLSearchParams(state.filters);
   state.deck = await api('GET', `/api/workers?${query}`);
+  state.deckIndex = 0;
   renderDeck();
 }
 
@@ -760,6 +814,7 @@ const actions = {
   'add-job': () => $('#jobs').insertAdjacentHTML('beforeend', jobFields()),
   'remove-job': (el) => el.closest('.job').remove(),
   decide: (el) => decide(el.dataset.decision),
+  'browse-step': (el) => browse(Number(el.dataset.step)),
   'reload-deck': () => loadDeck(),
   async 'remove-shortlist'(el) {
     await api('DELETE', `/api/decisions/${el.dataset.id}`);
@@ -861,11 +916,12 @@ document.addEventListener('submit', async (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (!e.target.matches?.('.card.top')) return;
-  const decision = { ArrowLeft: 'reject', ArrowRight: 'accept', ArrowUp: 'skip' }[e.key];
-  if (decision) {
-    e.preventDefault();
-    decide(decision);
-  }
+  const step = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
+  const decision = { ArrowUp: 'accept', ArrowDown: 'reject' }[e.key];
+  if (!step && !decision) return;
+  e.preventDefault();
+  if (step) browse(step);
+  else decide(decision);
 });
 
 // ---------- start ----------

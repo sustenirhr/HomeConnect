@@ -261,6 +261,15 @@ input[type="file"]::file-selector-button {
 .stamp.yes { left: 18px; color: var(--gold); transform: rotate(-14deg); }
 .stamp.no { right: 18px; color: var(--white); transform: rotate(14deg); }
 .card[data-lean="accept"] .stamp.yes, .card[data-lean="reject"] .stamp.no { opacity: 1; }
+/* Vertical drags on the photo shortlist/reject, so the browser must not scroll there. */
+.card .photo { touch-action: none; }
+.counter {
+  position: absolute; top: 12px; right: 12px; z-index: 2; padding: 3px 10px; border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55); color: var(--gold-light); font-size: 0.75rem; font-weight: 600;
+}
+.card[data-lean="accept"] .counter, .card[data-lean="reject"] .counter { opacity: 0; }
+.swipe-hint { margin: 16px 24px 0; text-align: center; font-size: 0.78rem; color: var(--muted); }
+.swipe-hint strong { color: var(--gold-light); font-weight: 600; }
 
 .card .body { padding: 16px 8px 10px; }
 
@@ -289,8 +298,9 @@ dd { margin: 0; overflow-wrap: anywhere; }
 }
 .round:hover { transform: translateY(-2px); }
 .round:active { box-shadow: var(--inset); transform: none; }
-.round.skip { width: 52px; height: 52px; color: var(--muted); font-size: 1.2rem; box-shadow: var(--raised-sm); }
-.round.skip:active { box-shadow: var(--inset-sm); }
+.round.nav { width: 50px; height: 50px; color: var(--gold); font-size: 1.7rem; box-shadow: var(--raised-sm); }
+.round.nav:active { box-shadow: var(--inset-sm); }
+.round:disabled { opacity: 0.3; cursor: default; transform: none; box-shadow: var(--inset-sm); }
 .round.accept { background: var(--gold-fill); color: #111; box-shadow: var(--gold-raised); }
 .round.accept:active { box-shadow: var(--gold-pressed); }
 .action { display: flex; flex-direction: column; align-items: center; gap: 10px; font-size: 0.72rem; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
