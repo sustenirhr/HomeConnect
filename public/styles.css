@@ -1,9 +1,11 @@
 /*
-  Neumorphic dark theme. Every surface shares the --bg colour and is shaped only by
+  Neumorphic theme. Every surface shares the --bg colour and is shaped only by
   a light shadow (top-left) and a dark shadow (bottom-right): "raised" elements
   stand out of the page, "inset" ones are pressed into it. Gold marks the highlights.
+  Dark mode is the default; light mode only swaps the colour variables below.
 */
 :root {
+  color-scheme: dark;
   --bg: #1b1b1b;
   --shade: #0d0d0d;
   --light: #2a2a2a;
@@ -11,10 +13,12 @@
   --gold-light: #f0d77b;
   --gold-deep: #a8851f;
   --gold-fill: linear-gradient(145deg, #e4c35c, #b9922a);
-  --white: #ffffff;
+  --text: #ffffff;
   --muted: #a3a3a3;
   --faint: #6f6f6f;
   --danger: #e5484d;
+  --danger-text: #ffb3b5;
+  --initials-glow: #2b2513;
 
   --raised: 7px 7px 16px var(--shade), -7px -7px 16px var(--light);
   --raised-sm: 4px 4px 9px var(--shade), -4px -4px 9px var(--light);
@@ -24,6 +28,33 @@
   --gold-pressed: inset 4px 4px 8px var(--gold-deep), inset -3px -3px 8px #f3d778;
 }
 
+/* Warm off-white with deeper gold for text and links so they stay readable on a light background. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #ebe7df;
+  --shade: #c5bfb3;
+  --light: #ffffff;
+  --gold: #8a6510;
+  --gold-light: #7a580c;
+  --text: #1c1a17;
+  --muted: #5e5a53;
+  --faint: #8d887f;
+  --danger: #c4282d;
+  --danger-text: #a3161b;
+  --initials-glow: #f5e6b8;
+}
+
+.theme-toggle {
+  display: grid; place-items: center; width: 38px; height: 38px; padding: 0; border: 0; border-radius: 50%;
+  background: var(--bg); color: var(--gold); font-size: 1.1rem; line-height: 1; box-shadow: var(--raised-sm);
+}
+.theme-toggle:active { box-shadow: var(--inset-sm); }
+.bar-actions { display: flex; align-items: center; gap: 14px; }
+.install-slot { display: flex; justify-content: center; text-align: center; }
+.install-slot:not(:empty) { margin-top: 18px; }
+.install-slot strong { color: var(--gold-light); }
+.landing-theme { position: fixed; top: 16px; right: max(16px, calc(50% - 214px)); }
+
 * { box-sizing: border-box; }
 
 html, body { height: 100%; }
@@ -31,7 +62,7 @@ html, body { height: 100%; }
 body {
   margin: 0;
   background: var(--bg);
-  color: var(--white);
+  color: var(--text);
   font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
@@ -78,7 +109,7 @@ button { font: inherit; cursor: pointer; color: inherit; }
 .btn:disabled { opacity: 0.5; cursor: wait; }
 .btn.ghost, .btn.plain { background: var(--bg); box-shadow: var(--raised-sm); }
 .btn.ghost { color: var(--gold); }
-.btn.plain { color: var(--white); font-weight: 600; }
+.btn.plain { color: var(--text); font-weight: 600; }
 .btn.ghost:active, .btn.plain:active { box-shadow: var(--inset-sm); }
 .btn.sm { width: auto; padding: 9px 16px; border-radius: 12px; font-size: 0.875rem; }
 
@@ -147,7 +178,7 @@ input, select, textarea {
   border: 0;
   border-radius: 12px;
   background: var(--bg);
-  color: var(--white);
+  color: var(--text);
   font: inherit;
   box-shadow: var(--inset);
   transition: box-shadow 0.15s;
@@ -196,7 +227,7 @@ input[type="file"]::file-selector-button {
 .job { padding: 16px; border-radius: 16px; box-shadow: var(--inset); display: flex; flex-direction: column; gap: 12px; }
 .job-head { display: flex; justify-content: space-between; align-items: center; color: var(--gold); font-weight: 600; font-size: 0.875rem; }
 
-.error { padding: 11px 15px; border-radius: 12px; color: #ffb3b5; box-shadow: var(--inset-sm), inset 0 0 0 1px rgba(229, 72, 77, 0.6); font-size: 0.9rem; }
+.error { padding: 11px 15px; border-radius: 12px; color: var(--danger-text); box-shadow: var(--inset-sm), inset 0 0 0 1px rgba(229, 72, 77, 0.6); font-size: 0.9rem; }
 
 /* ---------- app shell ---------- */
 
@@ -219,7 +250,7 @@ input[type="file"]::file-selector-button {
   color: var(--muted); font-weight: 600; font-size: 0.86rem; letter-spacing: 0.03em;
   transition: box-shadow 0.15s, color 0.15s;
 }
-.tabs button:hover { color: var(--white); }
+.tabs button:hover { color: var(--text); }
 .tabs button.on { color: var(--gold); box-shadow: var(--inset-sm); }
 
 /* ---------- browse deck ---------- */
@@ -245,13 +276,13 @@ input[type="file"]::file-selector-button {
 .card .photo { position: relative; height: 62%; min-height: 240px; border-radius: 18px; overflow: hidden; box-shadow: var(--inset); }
 .card .photo img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
 .card .photo::after { content: ""; position: absolute; inset: 40% 0 0; background: linear-gradient(transparent, rgba(0, 0, 0, 0.9)); }
-.card .who { position: absolute; left: 18px; right: 18px; bottom: 14px; z-index: 1; }
+.card .who { color: #fff; position: absolute; left: 18px; right: 18px; bottom: 14px; z-index: 1; }
 .card .who h3 { font-size: 1.6rem; }
-.card .who h3 small { font-family: system-ui, sans-serif; font-weight: 400; font-size: 1.25rem; color: var(--gold-light); }
+.card .who h3 small { font-family: system-ui, sans-serif; font-weight: 400; font-size: 1.25rem; color: #f0d77b; }
 
 .initials {
   width: 100%; height: 100%; display: grid; place-items: center;
-  font: 700 4.5rem Georgia, serif; color: var(--gold); background: radial-gradient(circle at 50% 35%, #2b2513, var(--bg) 75%);
+  font: 700 4.5rem Georgia, serif; color: var(--gold); background: radial-gradient(circle at 50% 35%, var(--initials-glow), var(--bg) 75%);
 }
 
 .stamp {
@@ -259,14 +290,14 @@ input[type="file"]::file-selector-button {
   font-weight: 800; font-size: 1.3rem; letter-spacing: 0.1em; opacity: 0; transition: opacity 0.12s;
   background: rgba(0, 0, 0, 0.35);
 }
-.stamp.yes { left: 18px; color: var(--gold); transform: rotate(-14deg); }
-.stamp.no { right: 18px; color: var(--white); transform: rotate(14deg); }
+.stamp.yes { left: 18px; color: #d4af37; transform: rotate(-14deg); }
+.stamp.no { right: 18px; color: #fff; transform: rotate(14deg); }
 .card[data-lean="accept"] .stamp.yes, .card[data-lean="reject"] .stamp.no { opacity: 1; }
 /* Vertical drags on the photo shortlist/reject, so the browser must not scroll there. */
 .card .photo { touch-action: none; }
 .counter {
   position: absolute; top: 12px; right: 12px; z-index: 2; padding: 3px 10px; border-radius: 999px;
-  background: rgba(0, 0, 0, 0.55); color: var(--gold-light); font-size: 0.75rem; font-weight: 600;
+  background: rgba(0, 0, 0, 0.55); color: #f0d77b; font-size: 0.75rem; font-weight: 600;
 }
 .card[data-lean="accept"] .counter, .card[data-lean="reject"] .counter { opacity: 0; }
 .swipe-hint { margin: 16px 24px 0; text-align: center; font-size: 0.78rem; color: var(--muted); }
@@ -294,7 +325,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .actions { display: flex; justify-content: center; align-items: center; gap: 26px; padding: 22px 20px 20px; }
 .round {
   display: grid; place-items: center; width: 66px; height: 66px; border: 0; border-radius: 50%;
-  background: var(--bg); color: var(--white); font-size: 1.6rem; line-height: 1;
+  background: var(--bg); color: var(--text); font-size: 1.6rem; line-height: 1;
   box-shadow: var(--raised); transition: box-shadow 0.15s, transform 0.12s;
 }
 .round:hover { transform: translateY(-2px); }
@@ -349,7 +380,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
 
 .chat-btn .count {
   display: inline-grid; place-items: center; min-width: 20px; height: 20px; margin-left: 6px; padding: 0 6px;
-  border-radius: 999px; background: #111; color: var(--gold-light); font-size: 0.72rem;
+  border-radius: 999px; background: #111; color: #f0d77b; font-size: 0.72rem;
 }
 .tabs button { position: relative; }
 .tabs button.unread::after {
@@ -385,8 +416,8 @@ dd { margin: 0; overflow-wrap: anywhere; }
 #toast {
   position: fixed; left: 50%; bottom: 104px; transform: translate(-50%, 20px);
   max-width: min(400px, calc(100vw - 40px)); padding: 13px 20px; border-radius: 16px;
-  background: var(--bg); color: var(--white); font-size: 0.92rem; text-align: center;
-  box-shadow: 8px 8px 20px #050505, -4px -4px 14px var(--light), inset 0 0 0 1px rgba(212, 175, 55, 0.5);
+  background: var(--bg); color: var(--text); font-size: 0.92rem; text-align: center;
+  box-shadow: 8px 8px 20px var(--shade), -4px -4px 14px var(--light), inset 0 0 0 1px rgba(212, 175, 55, 0.5);
   opacity: 0; pointer-events: none; transition: opacity 0.2s, transform 0.2s; z-index: 10;
 }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
@@ -394,3 +425,14 @@ dd { margin: 0; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* Account safety: password reset link, report and block in chat, blocked list, account deletion. */
+.link.forgot { align-self: flex-end; }
+.chat-tools { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex: none; }
+.report { padding: 16px; border-radius: 18px; box-shadow: var(--raised-sm); gap: 12px; flex: none; }
+.check { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; }
+.check input { width: 18px; height: 18px; accent-color: var(--gold); }
+.blocked { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; color: var(--text); }
+.btn.danger { background: var(--danger); color: #fff; box-shadow: var(--raised-sm); }
+.btn.plain.danger { background: var(--bg); color: var(--danger-text); }
+#delete-form { margin-top: 14px; }

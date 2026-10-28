@@ -1,7 +1,7 @@
 // Fills the database with demo accounts so the app can be tried out straight away.
 // Run with: npm run seed
 // All demo accounts share DEMO_PASSWORD. Do not run this against a production database.
-const { db, createUser } = require('./db');
+const { db, hashPassword, createUser } = require('./db');
 
 const DEMO_PASSWORD = 'demo1234';
 const DEMO_EMPLOYER_PHONE = '0700000100';
@@ -34,12 +34,12 @@ let created = 0;
 workers.forEach((profile, i) => {
   const phone = `07000000${String(i + 1).padStart(2, '0')}`;
   if (insert.get(phone)) return;
-  createUser('worker', phone, DEMO_PASSWORD, { ...profile, id_number: `DEMO${1000 + i}` });
+  createUser('worker', phone, hashPassword(DEMO_PASSWORD), { ...profile, id_number: `DEMO${1000 + i}` });
   created++;
 });
 
 if (!insert.get(DEMO_EMPLOYER_PHONE)) {
-  createUser('employer', DEMO_EMPLOYER_PHONE, DEMO_PASSWORD, {
+  createUser('employer', DEMO_EMPLOYER_PHONE, hashPassword(DEMO_PASSWORD), {
     name: 'Demo Employer', location: 'Kilimani, Nairobi', age: 38, id_number: 'DEMO2000', num_kids: 2, house_size: '3 bedrooms', religion: 'Christian',
   });
   created++;

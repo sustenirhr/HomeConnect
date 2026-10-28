@@ -3,6 +3,7 @@ const RELIGIONS = ['Christian', 'Muslim', 'Hindu', 'Traditional', 'Other', 'None
 const EDUCATION = ['No formal education', 'Primary', 'Secondary', 'Certificate / Vocational', 'Diploma', 'Degree'];
 const HOUSE_SIZES = ['Bedsitter / Studio', '1 bedroom', '2 bedrooms', '3 bedrooms', '4 bedrooms', '5+ bedrooms'];
 const WORK_TYPES = { fulltime: 'Full-time', parttime: 'Part-time', either: 'Full-time or part-time' };
+const REPORT_REASONS = ['Harassment or abuse', 'Scam or asking for money', 'Inappropriate messages', 'Fake profile', 'Other'];
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const app = $('#app');
@@ -104,7 +105,37 @@ const accountFields = () => `
       ${passwordInput(`id="new-password" minlength="8" autocomplete="new-password" aria-describedby="pw-hint" data-pw-rule`)}
       <span class="hint" id="pw-hint">${PASSWORD_RULE}</span>
     </div>
+    ${codeField()}
   </fieldset>`;
+
+// Sign-up and password reset text a code first. Fields marked data-after-code stay hidden, with their
+// inputs disabled so the browser skips them, until the code has been sent.
+const codeField = () => `
+  <div class="field" data-after-code hidden>
+    <label class="field-label" for="sms-code">6-digit code from the text message</label>
+    <input id="sms-code" name="code" required disabled inputmode="numeric" autocomplete="one-time-code" pattern="\\d{6}" maxlength="6" placeholder="123456">
+    <span class="hint">Sent to <strong data-code-phone></strong>.
+      <button type="button" class="link small" data-action="resend-code">Send again</button> ·
+      <button type="button" class="link small" data-action="change-phone">Use another number</button></span>
+  </div>`;
+
+function setCodeStep(form, sent) {
+  form.dataset.codeSent = sent ? '1' : '';
+  form.phone.readOnly = sent;
+  form.querySelectorAll('[data-after-code]').forEach((el) => {
+    el.hidden = !sent;
+    el.querySelectorAll('input').forEach((input) => (input.disabled = !sent));
+  });
+  $('button[type="submit"]', form).textContent = sent ? form.dataset.confirmLabel : form.dataset.startLabel;
+}
+
+async function sendCode(form) {
+  await api('POST', '/api/otp', { phone: form.phone.value, purpose: form.dataset.purpose });
+  setCodeStep(form, true);
+  $('[data-code-phone]', form).textContent = form.phone.value;
+  form.code.focus();
+  toast('Code sent. Check your text messages.');
+}
 
 const employerFields = (p = {}) => `
   <fieldset>
@@ -239,15 +270,68 @@ function showError(form, message) {
 
 // ---------- signed-out screens ----------
 
+// ---------- install as an app ----------
+// Chrome/Edge/Samsung Internet fire beforeinstallprompt when the site can be installed, which lets us
+// show our own Install button. iPhones never do, so there we explain the Share → Add to Home Screen route.
+
+let installPrompt = null;
+const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+const isInstalled = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+
+function installSlot() {
+  if (isInstalled()) return '';
+  if (installPrompt) return '<button class="btn ghost sm" data-action="install-app">⤓ Install the app</button>';
+  if (isIos) return '<p class="muted small">Install on iPhone: tap <strong>Share</strong>, then <strong>Add to Home Screen</strong>.</p>';
+  return '';
+}
+
+const refreshInstallSlots = () => document.querySelectorAll('[data-install-slot]').forEach((el) => (el.innerHTML = installSlot()));
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  refreshInstallSlots();
+});
+
+window.addEventListener('appinstalled', () => {
+  installPrompt = null;
+  refreshInstallSlots();
+  toast('Kazinyumbani is installed. Open it from your home screen.');
+});
+
+// ---------- light / dark mode ----------
+// Dark is the default. The choice is remembered per browser; index.html applies it before first paint.
+
+const isLight = () => document.documentElement.dataset.theme === 'light';
+
+const themeButton = () =>
+  `<button class="theme-toggle" data-action="toggle-theme" aria-label="Switch to ${isLight() ? 'dark' : 'light'} mode" title="Switch to ${
+    isLight() ? 'dark' : 'light'
+  } mode">${isLight() ? '☾' : '☀'}</button>`;
+
+function setTheme(light) {
+  if (light) document.documentElement.dataset.theme = 'light';
+  else delete document.documentElement.dataset.theme;
+  $('meta[name="theme-color"]').content = light ? '#ebe7df' : '#1b1b1b';
+  try {
+    localStorage.setItem('theme', light ? 'light' : 'dark');
+  } catch {
+    // Private browsing can block storage; the theme still applies for this visit.
+  }
+  document.querySelectorAll('.theme-toggle').forEach((button) => (button.outerHTML = themeButton()));
+}
+
 function renderLanding() {
   app.innerHTML = `
+    <div class="landing-theme">${themeButton()}</div>
     <section class="landing">
-      <h1 class="logo">Home<span>Connect</span></h1>
+      <h1 class="logo">Kazi<span>nyumbani</span></h1>
       <div class="rule"></div>
       <p class="tagline">Where families and trusted domestic workers find each other.</p>
       <button class="btn" data-action="go" data-screen="employer">I'm looking to hire</button>
       <button class="btn ghost" data-action="go" data-screen="worker">I'm looking for work</button>
       <p class="muted small" style="margin-top:18px">Already have an account? <button class="link" data-action="go" data-screen="login">Log in</button></p>
+      <div class="install-slot" data-install-slot>${installSlot()}</div>
     </section>`;
 }
 
@@ -265,8 +349,28 @@ function renderAuth(screen) {
           <div class="field">
             <label class="field-label" for="login-password">Password</label>
             ${passwordInput('id="login-password" autocomplete="current-password"')}
+            <button type="button" class="link small forgot" data-action="go" data-screen="reset">Forgot your password?</button>
           </div>
           <button class="btn" type="submit">Log in</button>
+        </form>
+      </section>`;
+    return;
+  }
+  if (screen === 'reset') {
+    app.innerHTML = `
+      <section class="page">
+        <button class="link" data-action="go" data-screen="login">← Back to log in</button>
+        <h2>Reset your password</h2>
+        <p class="muted">We'll text a code to the phone number on your account.</p>
+        <form id="reset-form" data-purpose="reset" data-start-label="Send code" data-confirm-label="Set new password">
+          ${field('Phone number', input('phone', '', 'type="tel" required autocomplete="tel"'))}
+          ${codeField()}
+          <div class="field" data-after-code hidden>
+            <label class="field-label" for="new-password">New password</label>
+            ${passwordInput('id="new-password" disabled minlength="8" autocomplete="new-password" aria-describedby="pw-hint" data-pw-rule')}
+            <span class="hint" id="pw-hint">${PASSWORD_RULE}</span>
+          </div>
+          <button class="btn" type="submit">Send code</button>
         </form>
       </section>`;
     return;
@@ -280,8 +384,9 @@ function renderAuth(screen) {
         employer
           ? 'Tell workers a little about your household.'
           : 'Employers will see this profile. Your ID number is never shown, and your phone number is only shared with employers you accept.'
-      }</p>
-      <form id="register-form" data-role="${screen}">
+      } We'll text you a code to confirm your phone number.</p>
+      <form id="register-form" data-role="${screen}" data-purpose="register"
+        data-start-label="Create account" data-confirm-label="Confirm code and create account">
         ${employer ? employerFields() : workerFields()}
         ${accountFields()}
         <button class="btn" type="submit">Create account</button>
@@ -315,7 +420,8 @@ function stopChat() {
 
 // Puts a dot on the tab where matched chats live when there are unread messages.
 async function refreshUnread() {
-  if (!state.me) return;
+  // Skip polls while the app is in the background; it catches up as soon as it is visible again.
+  if (!state.me || document.hidden) return;
   const tabId = state.me.role === 'employer' ? 'shortlist' : 'requests';
   try {
     const { total } = await api('GET', '/api/chats/unread');
@@ -359,7 +465,20 @@ async function openChat(otherId) {
           <h3>${esc(other.name)}</h3>
           <a class="small" href="tel:${esc(other.phone)}">${esc(other.phone)}</a>
         </div>
+        <div class="chat-tools">
+          <button class="link small" data-action="report">Report</button>
+          <button class="link small" data-action="block">Block</button>
+        </div>
       </header>
+      <form id="report-form" class="report" hidden>
+        ${field('What happened?', select('reason', same(REPORT_REASONS), ''))}
+        ${field('Details (optional)', '<textarea name="details" maxlength="1000" rows="3"></textarea>')}
+        <label class="check"><input type="checkbox" name="block" checked> Also block ${firstName(other.name)}</label>
+        <div class="row">
+          <button type="button" class="btn plain sm" data-action="cancel-report">Cancel</button>
+          <button class="btn sm" type="submit">Send report</button>
+        </div>
+      </form>
       <div class="messages" id="messages" aria-live="polite">
         <p class="chat-empty muted small">No messages yet. Say hello to ${firstName(other.name)}!</p>
       </div>
@@ -373,6 +492,7 @@ async function openChat(otherId) {
   refreshUnread();
   chatTimer = setInterval(async () => {
     if (!state.chat || !$('#messages')) return stopChat();
+    if (document.hidden) return;
     try {
       const { messages: fresh } = await api('GET', `/api/chats/${otherId}?after=${state.chat.lastId}`);
       appendMessages(fresh);
@@ -394,8 +514,11 @@ function renderHome() {
   if (!tabs.some(([id]) => id === state.tab)) state.tab = tabs[0][0];
   app.innerHTML = `
     <header class="bar">
-      <div class="logo">Home<span>Connect</span></div>
-      <button class="link small" data-action="logout">Log out</button>
+      <div class="logo">Kazi<span>nyumbani</span></div>
+      <div class="bar-actions">
+        ${themeButton()}
+        <button class="link small" data-action="logout">Log out</button>
+      </div>
     </header>
     <main id="view"></main>
     <nav class="tabs">
@@ -863,10 +986,46 @@ const views = {
           <button class="btn" type="submit">Save changes</button>
           ${role === 'employer' ? '<button class="btn plain" type="button" data-action="restore-rejected">Show rejected profiles again</button>' : ''}
         </form>
+        <div class="install-slot" data-install-slot>${installSlot()}</div>
+        <div class="subhead">Blocked people</div>
+        <div id="blocked-list" class="muted small">Loading…</div>
+        <div class="subhead">Delete account</div>
+        <p class="muted small">Permanently erases your profile, photos, matches, vacancies and chats. This cannot be undone.</p>
+        <button class="btn plain danger" data-action="show-delete">Delete my account</button>
+        <form id="delete-form" hidden>
+          <div class="field">
+            <label class="field-label" for="delete-password">Enter your password to confirm</label>
+            ${passwordInput('id="delete-password" autocomplete="current-password"')}
+          </div>
+          <button class="btn danger" type="submit">Delete my account permanently</button>
+          <button type="button" class="link" data-action="cancel-delete">Cancel</button>
+        </form>
       </section>`;
     syncConditionals($('#profile-form'));
+    await loadBlocked();
   },
 };
+
+async function loadBlocked() {
+  const blocked = await api('GET', '/api/blocks');
+  const list = $('#blocked-list');
+  if (!list) return;
+  list.innerHTML = blocked.length
+    ? blocked
+        .map(
+          (b) => `<div class="blocked"><span>${esc(b.name ?? 'Deleted account')}</span>
+            <button class="btn plain sm" data-action="unblock" data-id="${b.id}">Unblock</button></div>`
+        )
+        .join('')
+    : 'You have not blocked anyone.';
+}
+
+function signedOut() {
+  stopChat();
+  clearInterval(unreadTimer);
+  Object.assign(state, { me: null, tab: null, deck: [], filters: noFilters() });
+  renderLanding();
+}
 
 // ---------- events ----------
 
@@ -898,17 +1057,61 @@ const actions = {
     toast('Application withdrawn.');
     await views.jobs();
   },
+  'toggle-theme': () => setTheme(!isLight()),
+  async 'install-app'() {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    await installPrompt.userChoice;
+    installPrompt = null; // a prompt can only be used once
+    refreshInstallSlots();
+  },
   'open-chat': (el) => openChat(Number(el.dataset.id)),
   'close-chat'() {
     stopChat();
     return views[state.tab]();
   },
   async logout() {
-    stopChat();
-    clearInterval(unreadTimer);
     await api('POST', '/api/logout', {});
-    Object.assign(state, { me: null, tab: null, deck: [], filters: noFilters() });
-    renderLanding();
+    signedOut();
+  },
+  async 'resend-code'(el) {
+    const form = el.closest('form');
+    await api('POST', '/api/otp', { phone: form.phone.value, purpose: form.dataset.purpose });
+    toast('A new code is on its way.');
+  },
+  'change-phone'(el) {
+    const form = el.closest('form');
+    setCodeStep(form, false);
+    form.phone.focus();
+  },
+  report() {
+    const form = $('#report-form');
+    form.hidden = !form.hidden;
+  },
+  'cancel-report'() {
+    $('#report-form').reset();
+    $('#report-form').hidden = true;
+  },
+  async block() {
+    if (!confirm('Block this person? Neither of you will be able to see or message the other. You can unblock them from your profile.')) return;
+    await api('POST', `/api/blocks/${state.chat.otherId}`);
+    stopChat();
+    toast('Blocked. They can no longer contact you.');
+    return views[state.tab]();
+  },
+  async unblock(el) {
+    await api('DELETE', `/api/blocks/${el.dataset.id}`);
+    toast('Unblocked.');
+    await loadBlocked();
+  },
+  'show-delete'(el) {
+    el.hidden = true;
+    $('#delete-form').hidden = false;
+    $('#delete-password').focus();
+  },
+  'cancel-delete'() {
+    $('#delete-form').hidden = true;
+    $('[data-action="show-delete"]').hidden = false;
   },
   'clear-filters'() {
     state.filters = noFilters();
@@ -996,14 +1199,36 @@ document.addEventListener('submit', async (e) => {
     } else if (form.id === 'register-form') {
       const role = form.dataset.role;
       if (role === 'worker' && !state.images.photo) throw new Error('Please add a photo of yourself');
+      if (!form.dataset.codeSent) return await sendCode(form);
       state.me = await api('POST', '/api/register', {
         role,
         phone: form.phone.value,
         password: form.password.value,
+        code: form.code.value,
         profile: readProfile(form, role),
       });
       renderHome();
-      toast('Welcome to HomeConnect!');
+      toast('Welcome to Kazinyumbani!');
+    } else if (form.id === 'reset-form') {
+      if (!form.dataset.codeSent) return await sendCode(form);
+      state.me = await api('POST', '/api/password-reset', { phone: form.phone.value, code: form.code.value, password: form.password.value });
+      renderHome();
+      toast('Password changed. Any other devices have been logged out.');
+    } else if (form.id === 'delete-form') {
+      await api('DELETE', '/api/account', { password: form.password.value });
+      signedOut();
+      toast('Your account and all its data have been deleted.');
+    } else if (form.id === 'report-form') {
+      const block = form.block.checked;
+      await api('POST', '/api/reports', { user_id: state.chat.otherId, reason: form.reason.value, details: form.details.value, block });
+      if (block) {
+        stopChat();
+        toast('Thanks for reporting. They are blocked and can no longer contact you.');
+        return await views[state.tab]();
+      }
+      form.reset();
+      form.hidden = true;
+      toast('Thanks for reporting. We will look into it.');
     } else if (form.id === 'chat-form') {
       const text = form.body.value.trim();
       if (!text) return;
@@ -1049,6 +1274,17 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ---------- start ----------
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {
+    // The app still works without it; it just can't be installed.
+  });
+}
+
+// Polling pauses while the app is in the background, so catch up the moment it comes back.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refreshUnread();
+});
 
 api('GET', '/api/me')
   .then((me) => {

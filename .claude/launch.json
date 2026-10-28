@@ -2,7 +2,7 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "homeconnect",
+      "name": "kazinyumbani",
       "runtimeExecutable": "node",
       "runtimeArgs": ["--disable-warning=ExperimentalWarning", "server.js"],
       "port": 3000

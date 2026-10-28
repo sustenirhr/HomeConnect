@@ -6,6 +6,8 @@ const db = new DatabaseSync(process.env.DB_PATH || path.join(__dirname, 'homecon
 
 db.exec(`
   PRAGMA journal_mode = WAL;
+  PRAGMA synchronous = NORMAL;
+  PRAGMA busy_timeout = 5000;
   PRAGMA foreign_keys = ON;
 
   CREATE TABLE IF NOT EXISTS users (
@@ -99,11 +101,59 @@ db.exec(`
     created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     read_at     TEXT
   );
+  -- One-time SMS codes for confirming a phone number at sign-up and for password resets.
+  -- Only a hash of the code is stored; a new code for the same phone and purpose replaces the old one.
+  CREATE TABLE IF NOT EXISTS otps (
+    phone      TEXT NOT NULL,
+    purpose    TEXT NOT NULL CHECK (purpose IN ('register', 'reset')),
+    code_hash  TEXT NOT NULL,
+    attempts   INTEGER NOT NULL DEFAULT 0,
+    expires_at TEXT NOT NULL,
+    PRIMARY KEY (phone, purpose)
+  );
+
+  -- A block works both ways: neither person sees or can message the other.
+  CREATE TABLE IF NOT EXISTS blocks (
+    blocker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    blocked_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (blocker_id, blocked_id)
+  );
+
+  -- Reports outlive the accounts involved, so the phone and name are copied in. Review them with: npm run admin
+  CREATE TABLE IF NOT EXISTS reports (
+    id             INTEGER PRIMARY KEY,
+    reporter_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    reported_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    reported_phone TEXT NOT NULL,
+    reported_name  TEXT NOT NULL,
+    reason         TEXT NOT NULL,
+    details        TEXT NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved')),
+    created_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE INDEX IF NOT EXISTS messages_by_pair ON messages (employer_id, worker_id, id);
+  CREATE INDEX IF NOT EXISTS blocks_by_blocked ON blocks (blocked_id);
+  CREATE INDEX IF NOT EXISTS reports_by_status ON reports (status, id);
+  CREATE INDEX IF NOT EXISTS messages_by_worker ON messages (worker_id, employer_id);
+  CREATE INDEX IF NOT EXISTS sessions_by_user ON sessions (user_id);
+  CREATE INDEX IF NOT EXISTS sessions_by_age ON sessions (created_at);
+  CREATE INDEX IF NOT EXISTS decisions_by_worker ON decisions (worker_id);
+  CREATE INDEX IF NOT EXISTS jobs_by_employer ON jobs (employer_id);
+  CREATE INDEX IF NOT EXISTS jobs_by_status ON jobs (status, created_at);
+  CREATE INDEX IF NOT EXISTS applications_by_worker ON applications (worker_id);
 `);
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
   return { salt, hash: crypto.scryptSync(password, salt, 64).toString('hex') };
+}
+
+// The server uses this version: scrypt runs on the thread pool so one login does not stall every other request.
+function hashPasswordAsync(password, salt = crypto.randomBytes(16).toString('hex')) {
+  return new Promise((resolve, reject) =>
+    crypto.scrypt(password, salt, 64, (err, key) => (err ? reject(err) : resolve({ salt, hash: key.toString('hex') })))
+  );
 }
 
 const WORKER_COLUMNS = [
@@ -120,8 +170,8 @@ function saveProfile(role, userId, profile) {
   ).run(userId, ...columns.map((c) => profile[c] ?? null));
 }
 
-function createUser(role, phone, password, profile) {
-  const { salt, hash } = hashPassword(password);
+// `password` is a { salt, hash } pair from hashPassword or hashPasswordAsync.
+function createUser(role, phone, { salt, hash }, profile) {
   db.exec('BEGIN');
   try {
     const { lastInsertRowid } = db
@@ -136,4 +186,4 @@ function createUser(role, phone, password, profile) {
   }
 }
 
-module.exports = { db, hashPassword, saveProfile, createUser };
+module.exports = { db, hashPassword, hashPasswordAsync, saveProfile, createUser };
