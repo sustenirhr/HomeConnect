@@ -4,7 +4,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const zlib = require('node:zlib');
 const { db, hashPasswordAsync, saveProfile, createUser } = require('./db');
-const { sendSms } = require('./sms');
+const { sendSms, checkSmsAccount } = require('./sms');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -938,7 +938,10 @@ server.requestTimeout = 60_000;
 // Longer than a typical load balancer's idle timeout (60s), so the proxy closes idle connections first.
 server.keepAliveTimeout = 65_000;
 
-server.listen(PORT, () => console.log(`Kazinyumbani running at http://localhost:${PORT}`));
+server.listen(PORT, () => {
+  console.log(`Kazinyumbani running at http://localhost:${PORT}`);
+  checkSmsAccount();
+});
 
 // Hosting platforms send SIGTERM on deploys and restarts: finish in-flight requests, then close the database cleanly.
 for (const signal of ['SIGTERM', 'SIGINT']) {

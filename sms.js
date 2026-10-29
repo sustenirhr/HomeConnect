@@ -47,4 +47,21 @@ async function sendSms(phone, message) {
   }
 }
 
-module.exports = { sendSms };
+// Logs in once at startup (no text is sent) so a bad username or key shows up in the logs straight away.
+async function checkSmsAccount() {
+  if (!USERNAME || !API_KEY) return;
+  const account = `username "${USERNAME}", key ${API_KEY.length} characters starting ${API_KEY.slice(0, 5)} ending ${API_KEY.slice(-4)}`;
+  try {
+    const res = await fetch(`${ENDPOINT.replace('/messaging', '/user')}?username=${encodeURIComponent(USERNAME)}`, {
+      headers: { apiKey: API_KEY, Accept: 'application/json' },
+      signal: AbortSignal.timeout(10_000),
+    });
+    const text = await res.text();
+    if (res.ok) console.log(`[sms check] Africa's Talking login OK (${account}): ${text.slice(0, 200)}`);
+    else console.error(`[sms check] Africa's Talking login FAILED: ${res.status} ${text.slice(0, 200)} (${account})`);
+  } catch (err) {
+    console.error(`[sms check] could not reach Africa's Talking: ${err.message}`);
+  }
+}
+
+module.exports = { sendSms, checkSmsAccount };
